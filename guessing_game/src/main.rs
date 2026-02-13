@@ -13,11 +13,12 @@ use embassy_stm32::i2c::{Config as I2cConfig, I2c, Master};
 use embassy_stm32::rcc::PllSource;
 use embassy_stm32::rcc::Sysclk::{PLL1_R};
 use embassy_stm32::rcc::MSIRange::{RANGE4M};
-use embassy_time::{Delay};
+use embassy_time::{Delay, Duration, Instant};
 use embassy_stm32::time::{Hertz};
 use embassy_sync::channel::{Channel as SyncChannel, Sender};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use hd44780_driver::bus::I2CBus;
+use heapless::String;
 use infrared::Receiver;
 use infrared::protocol::nec::{Nec16Command,};
 use infrared::receiver::{NoPin};
@@ -30,6 +31,13 @@ use panic_probe as _;
 use defmt::info;
 
 static CHANNEL: SyncChannel<CriticalSectionRawMutex, char, 8> = SyncChannel::new();
+static SECOND_LINE_POS: u8 = 42;
+static ANSWER_LENGTH: usize = 4;
+static RECEIVER_FREQ: u32 = 1_000_000;
+static I2C_FREEQ: u32 = 100_000;
+static I2C_ADDRESS: u8 = 0x27;
+static DEBOUNCE_THRESHHOLD: u64 = 300;
+static LCD_EMPTY_LINE: &str = "                ";
 
 bind_interrupts!(struct Tim2Interrupt {
     TIM2 => CaptureCompareInterruptHandler<embassy_stm32::peripherals::TIM2>;
@@ -46,34 +54,30 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut lcd: LcdDriver = init_lcd(p.I2C1, p.PB8, p.PB9);
 
-    let rc =  Receiver::<Nec16, NoPin, u32, Nec16Command>::new(1_000_000);
+    let rc =  Receiver::<Nec16, NoPin, u32, Nec16Command>::new(RECEIVER_FREQ);
 
     spawner.spawn(ir_decoder_task(rc, p.TIM2, p.PA0, CHANNEL.sender())).unwrap();
 
-    let mut number_buffer: [u8; 4] = [0u8; 4];
-    let mut index = 0;
+    let mut digits: String<ANSWER_LENGTH> = String::new();
     let mut delay: Delay = Delay;
 
-    lcd.clear(&mut delay).unwrap();
-    lcd.write_str("Waiting...", &mut delay).unwrap();
+    erase_lcd(&mut lcd, &mut delay);
 
     loop {
         let digit = CHANNEL.receive().await;
 
-        info!("Digit: {}", digit);
+        if digit == 'd' {
+            digits.pop();
+        } else {
+            digits.push(digit).unwrap();
+        }
 
-        if number_buffer.len() >= 4 {
-            index = 0;
-            number_buffer = [b' '; 4];
-            lcd.set_cursor_pos(0, &mut delay).unwrap();
-            lcd.write_str("    ", &mut delay).unwrap();
-        };
+        if digits.len() > ANSWER_LENGTH - 1 {
+            erase_lcd(&mut lcd, &mut delay);
+            digits.clear();
+        }
 
-        number_buffer[index] = digit as u8;
-        index += 1;
-
-        lcd.set_cursor_pos(0, &mut delay).unwrap();
-        lcd.write_bytes(&number_buffer, &mut delay).unwrap();
+        lcd_write(&mut lcd, &mut delay, &digits);
     }
 }
 
@@ -91,42 +95,51 @@ async fn ir_decoder_task(
         None,
         None,
         Tim2Interrupt,
-        Hertz(1_000_000),
+        Hertz(RECEIVER_FREQ),
         CountingMode::EdgeAlignedUp,
     );
 
     let mut last_capture: u32 = 0;
     let mut edge = true;
 
+    let mut last_processed_time = Instant::now();
+    let debounce_threshhold = Duration::from_millis(DEBOUNCE_THRESHHOLD);
+
     loop {
         let now = ic.wait_for_any_edge(Channel::Ch1).await;
         let dt = now.wrapping_sub(last_capture);
         last_capture = now;
 
-
         match rc.event(dt, edge) {
             Ok(Some(cmd)) => {
-                info!("Commad {}", cmd.cmd);
-                let digit: Option<char> = match cmd.cmd {
-                    22 => Some('0'),
-                    12 => Some('1'),
-                    24 => Some('2'),
-                    94 => Some('3'),
-                    8 => Some('4'),
-                    28 => Some('5'),
-                    90 => Some('6'),
-                    66 => Some('7'),
-                    82 => Some('8'),
-                    74 => Some('9'),
-                    _ => None,
-                };
-                if let Some(d) = digit {
-                    sender.send(d).await;
-                }
+                let current_processed_time = Instant::now();
+                if current_processed_time.duration_since(last_processed_time) >= debounce_threshhold {
+                    last_processed_time = Instant::now();
+                    let digit: Option<char> = match cmd.cmd {
+                        22 => Some('0'),
+                        12 => Some('1'),
+                        24 => Some('2'),
+                        94 => Some('3'),
+                        8 => Some('4'),
+                        28 => Some('5'),
+                        90 => Some('6'),
+                        66 => Some('7'),
+                        82 => Some('8'),
+                        74 => Some('9'),
+                        68 => Some('d'),
+                        64 => Some('e'),
+                        _ => None,
+                    };
+
+                    if let Some(d) = digit {
+                        sender.send(d).await;
+                    }
+                } else {}
             }
+
             Ok(None) => {}
             Err(_e) => {}
-            };
+        }
 
         edge = !edge;
     }
@@ -155,7 +168,7 @@ fn init_lcd (
     sda: impl Into<Peri<'static, peripherals::PB9>>,
 ) -> LcdDriver<'static> {
     let mut i2c_config = I2cConfig::default();
-    i2c_config.frequency = Hertz(100_000); // 100 kHz
+    i2c_config.frequency = Hertz(I2C_FREEQ);
 
     // hd44780-driver crate only supports blocking I2C
     let i2c = I2c::new_blocking(
@@ -167,10 +180,28 @@ fn init_lcd (
 
     let mut delay: Delay = Delay;
 
-    let i2c_address = 0x27;
     return HD44780::new_i2c(
         i2c,
-        i2c_address,
+        I2C_ADDRESS,
         &mut delay
     ).expect("Failed to init LCD");
+}
+
+fn erase_lcd(lcd: &mut LcdDriver, delay: &mut Delay) {
+    lcd.set_cursor_pos(0, delay).unwrap();
+    lcd.write_str("Guess the number", delay).unwrap();
+    lcd.set_cursor_pos(SECOND_LINE_POS, delay).unwrap();
+    lcd.write_str(LCD_EMPTY_LINE, delay).unwrap();
+}
+
+fn lcd_write(lcd: &mut LcdDriver, delay: &mut Delay, s: &String<ANSWER_LENGTH>) {
+    lcd.set_cursor_pos(SECOND_LINE_POS, delay).unwrap();
+
+    lcd.write_str(s, delay).unwrap();
+
+    // remove ghosted chars
+    let remaining = ANSWER_LENGTH - s.len();
+    for _ in 0..remaining {
+        lcd.write_str(" ", delay).unwrap();
+    }
 }
