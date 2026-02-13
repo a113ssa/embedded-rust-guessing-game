@@ -4,17 +4,18 @@
 use embassy_executor::{Spawner};
 use embassy_stm32::mode::Blocking;
 use embassy_stm32::rcc::{Pll, PllMul, PllPreDiv, PllRDiv};
+use embassy_stm32::timer::{CaptureCompareInterruptHandler, Channel};
+use embassy_stm32::timer::input_capture::{CapturePin, InputCapture};
+use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::{Config, Peripherals, bind_interrupts, peripherals, Peri};
-use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Pull};
-use embassy_stm32::exti::InterruptHandler;
 use embassy_stm32::i2c::{Config as I2cConfig, I2c, Master};
 use embassy_stm32::rcc::PllSource;
 use embassy_stm32::rcc::Sysclk::{PLL1_R};
 use embassy_stm32::rcc::MSIRange::{RANGE4M};
-use embassy_time::{Delay, Instant};
+use embassy_time::{Delay};
 use embassy_stm32::time::{Hertz};
-use embassy_sync::channel::{Channel, Sender};
+use embassy_sync::channel::{Channel as SyncChannel, Sender};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use hd44780_driver::bus::I2CBus;
 use infrared::Receiver;
@@ -28,10 +29,10 @@ use panic_probe as _;
 
 use defmt::info;
 
-static CHANNEL: Channel<CriticalSectionRawMutex, char, 8> = Channel::new();
+static CHANNEL: SyncChannel<CriticalSectionRawMutex, char, 8> = SyncChannel::new();
 
-bind_interrupts!(struct Interrupts {
-    EXTI0 => InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI0>;
+bind_interrupts!(struct Tim2Interrupt {
+    TIM2 => CaptureCompareInterruptHandler<embassy_stm32::peripherals::TIM2>;
 });
 
 // type aliases to simplify long type hint
@@ -45,11 +46,9 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut lcd: LcdDriver = init_lcd(p.I2C1, p.PB8, p.PB9);
 
-    let ir_pin: ExtiInput<'_> = ExtiInput::new(p.PA0, p.EXTI0, Pull::Up, Interrupts);
-
     let rc =  Receiver::<Nec16, NoPin, u32, Nec16Command>::new(1_000_000);
 
-    spawner.spawn(ir_decoder_task(rc, ir_pin, CHANNEL.sender())).unwrap();
+    spawner.spawn(ir_decoder_task(rc, p.TIM2, p.PA0, CHANNEL.sender())).unwrap();
 
     let mut number_buffer: [u8; 4] = [0u8; 4];
     let mut index = 0;
@@ -60,15 +59,18 @@ async fn main(spawner: Spawner) -> ! {
 
     loop {
         let digit = CHANNEL.receive().await;
+
         info!("Digit: {}", digit);
 
         if number_buffer.len() >= 4 {
-            number_buffer = [0u8; 4];
             index = 0;
-            lcd.clear(&mut delay).unwrap();
+            number_buffer = [b' '; 4];
+            lcd.set_cursor_pos(0, &mut delay).unwrap();
+            lcd.write_str("    ", &mut delay).unwrap();
         };
 
         number_buffer[index] = digit as u8;
+        index += 1;
 
         lcd.set_cursor_pos(0, &mut delay).unwrap();
         lcd.write_bytes(&number_buffer, &mut delay).unwrap();
@@ -78,19 +80,29 @@ async fn main(spawner: Spawner) -> ! {
 #[embassy_executor::task]
 async fn ir_decoder_task(
     mut rc: Receiver<Nec16, NoPin, u32, Nec16Command>,
-    mut ir_pin: ExtiInput<'static>,
+    tim2: Peri<'static, peripherals::TIM2>,
+    pa0: Peri<'static, peripherals::PA0>,
     sender: Sender<'static, CriticalSectionRawMutex, char, 8>,
 ) -> ! {
-    let mut last_tick = Instant::now();
+    let mut ic = InputCapture::new(
+        tim2,
+        Some(CapturePin::new(pa0, Pull::Up)),
+        None,
+        None,
+        None,
+        Tim2Interrupt,
+        Hertz(1_000_000),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let mut last_capture: u32 = 0;
+    let mut edge = true;
 
     loop {
-        ir_pin.wait_for_any_edge().await;
+        let now = ic.wait_for_any_edge(Channel::Ch1).await;
+        let dt = now.wrapping_sub(last_capture);
+        last_capture = now;
 
-        let now = Instant::now();
-        let dt = now.duration_since(last_tick).as_micros() as u32;
-        last_tick = now;
-
-        let edge = ir_pin.is_low();
 
         match rc.event(dt, edge) {
             Ok(Some(cmd)) => {
@@ -115,6 +127,8 @@ async fn ir_decoder_task(
             Ok(None) => {}
             Err(_e) => {}
             };
+
+        edge = !edge;
     }
 }
 
@@ -158,5 +172,5 @@ fn init_lcd (
         i2c,
         i2c_address,
         &mut delay
-    ).expect("Failed to ini LCD");
+    ).expect("Failed to init LCD");
 }
