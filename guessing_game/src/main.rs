@@ -2,14 +2,12 @@
 #![no_main]
 
 use embassy_executor::{Spawner};
-use embassy_stm32::mode::Blocking;
 use embassy_stm32::rcc::{Pll, PllMul, PllPreDiv, PllRDiv};
 use embassy_stm32::timer::{CaptureCompareInterruptHandler, Channel};
 use embassy_stm32::timer::input_capture::{CapturePin, InputCapture};
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::{Config, Peripherals, bind_interrupts, peripherals, Peri};
 use embassy_stm32::gpio::{Pull};
-use embassy_stm32::i2c::{Config as I2cConfig, I2c, Master};
 use embassy_stm32::rcc::PllSource;
 use embassy_stm32::rcc::Sysclk::{PLL1_R};
 use embassy_stm32::rcc::MSIRange::{RANGE4M};
@@ -17,13 +15,13 @@ use embassy_time::{Delay, Duration, Instant};
 use embassy_stm32::time::{Hertz};
 use embassy_sync::channel::{Channel as SyncChannel, Sender};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use hd44780_driver::bus::I2CBus;
 use heapless::String;
 use infrared::Receiver;
 use infrared::protocol::nec::{Nec16Command,};
 use infrared::receiver::{NoPin};
 use infrared::protocol::{Nec16};
-use hd44780_driver::{ HD44780 };
+
+use lcd::{LcdModule, ANSWER_LENGTH};
 
 use defmt_rtt as _;
 use panic_probe as _;
@@ -31,37 +29,30 @@ use panic_probe as _;
 use defmt::info;
 
 static CHANNEL: SyncChannel<CriticalSectionRawMutex, char, 8> = SyncChannel::new();
-static SECOND_LINE_POS: u8 = 42;
-static ANSWER_LENGTH: usize = 4;
+
 static RECEIVER_FREQ: u32 = 1_000_000;
-static I2C_FREEQ: u32 = 100_000;
-static I2C_ADDRESS: u8 = 0x27;
+
 static DEBOUNCE_THRESHHOLD: u64 = 300;
-static LCD_EMPTY_LINE: &str = "                ";
+
 
 bind_interrupts!(struct Tim2Interrupt {
     TIM2 => CaptureCompareInterruptHandler<embassy_stm32::peripherals::TIM2>;
 });
 
-// type aliases to simplify long type hint
-type LcdI2c = I2c<'static, Blocking, Master>;
-type LcdBus = I2CBus<LcdI2c>;
-type LcdDriver<'a> = HD44780<LcdBus>;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
     let p: Peripherals = init_peripherals();
 
-    let mut lcd: LcdDriver = init_lcd(p.I2C1, p.PB8, p.PB9);
+    let mut lcd_module: LcdModule = LcdModule::new(p.I2C1, p.PB8, p.PB9);
 
     let rc =  Receiver::<Nec16, NoPin, u32, Nec16Command>::new(RECEIVER_FREQ);
 
     spawner.spawn(ir_decoder_task(rc, p.TIM2, p.PA0, CHANNEL.sender())).unwrap();
 
     let mut digits: String<ANSWER_LENGTH> = String::new();
-    let mut delay: Delay = Delay;
 
-    erase_lcd(&mut lcd, &mut delay);
+    lcd_module.erase();
 
     loop {
         let digit = CHANNEL.receive().await;
@@ -73,11 +64,11 @@ async fn main(spawner: Spawner) -> ! {
         }
 
         if digits.len() > ANSWER_LENGTH - 1 {
-            erase_lcd(&mut lcd, &mut delay);
+            lcd_module.erase();
             digits.clear();
         }
 
-        lcd_write(&mut lcd, &mut delay, &digits);
+        lcd_module.write(&digits);
     }
 }
 
@@ -162,46 +153,4 @@ fn init_peripherals() -> Peripherals {
     return embassy_stm32::init(config);
 }
 
-fn init_lcd (
-    i2c_p: impl Into<Peri<'static, peripherals::I2C1>>,
-    scl: impl Into<Peri<'static, peripherals::PB8>>,
-    sda: impl Into<Peri<'static, peripherals::PB9>>,
-) -> LcdDriver<'static> {
-    let mut i2c_config = I2cConfig::default();
-    i2c_config.frequency = Hertz(I2C_FREEQ);
-
-    // hd44780-driver crate only supports blocking I2C
-    let i2c = I2c::new_blocking(
-        i2c_p.into(),
-        scl.into(),
-        sda.into(),
-        i2c_config,
-    );
-
-    let mut delay: Delay = Delay;
-
-    return HD44780::new_i2c(
-        i2c,
-        I2C_ADDRESS,
-        &mut delay
-    ).expect("Failed to init LCD");
-}
-
-fn erase_lcd(lcd: &mut LcdDriver, delay: &mut Delay) {
-    lcd.set_cursor_pos(0, delay).unwrap();
-    lcd.write_str("Guess the number", delay).unwrap();
-    lcd.set_cursor_pos(SECOND_LINE_POS, delay).unwrap();
-    lcd.write_str(LCD_EMPTY_LINE, delay).unwrap();
-}
-
-fn lcd_write(lcd: &mut LcdDriver, delay: &mut Delay, s: &String<ANSWER_LENGTH>) {
-    lcd.set_cursor_pos(SECOND_LINE_POS, delay).unwrap();
-
-    lcd.write_str(s, delay).unwrap();
-
-    // remove ghosted chars
-    let remaining = ANSWER_LENGTH - s.len();
-    for _ in 0..remaining {
-        lcd.write_str(" ", delay).unwrap();
-    }
-}
+mod lcd;
