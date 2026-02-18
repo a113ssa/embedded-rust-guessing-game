@@ -1,4 +1,10 @@
-use embassy_stm32::{Peri, i2c::{Config, I2c, Master}, mode::Blocking, peripherals, time::Hertz};
+use embassy_stm32::{
+    Peri,
+    i2c::{Config, I2c, Master},
+    mode::Blocking,
+    peripherals,
+    time::Hertz,
+};
 use embassy_time::Delay;
 use hd44780_driver::{HD44780, bus::I2CBus};
 
@@ -18,7 +24,8 @@ type LcdBus = I2CBus<LcdI2c>;
 type LcdDriver<'a> = HD44780<LcdBus>;
 
 pub struct LcdModule {
-    driver: LcdDriver<'static> ,
+    driver: LcdDriver<'static>,
+    delay: Delay,
 }
 
 impl LcdModule {
@@ -28,7 +35,8 @@ impl LcdModule {
         sda_pin: Peri<'static, peripherals::PB9>,
     ) -> Self {
         Self {
-            driver: Self::init_driver(i2c_pin, scl_pin, sda_pin)
+            delay: Delay,
+            driver: Self::init_driver(i2c_pin, scl_pin, sda_pin),
         }
     }
 
@@ -41,56 +49,54 @@ impl LcdModule {
         i2c_config.frequency = Hertz(I2C_FREEQ);
 
         // hd44780-driver crate only supports blocking I2C
-        let i2c: I2c<'_, Blocking, Master> = I2c::new_blocking(
-            i2c_pin,
-            scl_pin,
-            sda_pin,
-            i2c_config,
-        );
+        let i2c: I2c<'_, Blocking, Master> =
+            I2c::new_blocking(i2c_pin, scl_pin, sda_pin, i2c_config);
 
         let mut delay: Delay = Delay;
 
-        return HD44780::new_i2c(
-            i2c,
-            I2C_ADDRESS,
-            &mut delay,
-        ).expect("Failed to init LCD");
+        return HD44780::new_i2c(i2c, I2C_ADDRESS, &mut delay).expect("Failed to init LCD");
     }
 
     pub fn erase(&mut self) {
-        let mut delay = Delay;
-        self.driver.set_cursor_pos(FIRST_LINE_POS, &mut delay).unwrap();
-        self.driver.write_str(GUESS_WELCOME_TITLE, &mut delay).unwrap();
+        self.driver
+            .set_cursor_pos(FIRST_LINE_POS, &mut self.delay)
+            .unwrap();
+        self.driver
+            .write_str(GUESS_WELCOME_TITLE, &mut self.delay)
+            .unwrap();
         Self::erase_second_line(self);
     }
 
     pub fn erase_second_line(&mut self) {
-        let mut delay = Delay;
-        self.driver.set_cursor_pos(SECOND_LINE_POS, &mut delay).unwrap();
-        self.driver.write_str(EMPTY_LINE, &mut delay).unwrap();
+        self.driver
+            .set_cursor_pos(SECOND_LINE_POS, &mut self.delay)
+            .unwrap();
+        self.driver.write_str(EMPTY_LINE, &mut self.delay).unwrap();
     }
 
     pub fn write(&mut self, s: &str) {
-        let mut delay = Delay;
-        self.driver.set_cursor_pos(SECOND_LINE_POS, &mut delay).unwrap();
+        self.driver
+            .set_cursor_pos(SECOND_LINE_POS, &mut self.delay)
+            .unwrap();
 
-        self.driver.write_str(s, &mut delay).unwrap();
+        self.driver.write_str(s, &mut self.delay).unwrap();
 
         // remove ghosted chars
-        Self::epmty_ghost_chars(self,ANSWER_LENGTH, s.len(), &mut delay);
+        Self::epmty_ghost_chars(self, ANSWER_LENGTH, s.len());
     }
 
     pub fn write_title(&mut self, title: &str) {
-        let mut delay = Delay;
-        self.driver.set_cursor_pos(FIRST_LINE_POS, &mut delay).unwrap();
-        self.driver.write_str(title, &mut delay).unwrap();
-        Self::epmty_ghost_chars(self, LINE_LENGTH, title.len() - 1, &mut delay);
+        self.driver
+            .set_cursor_pos(FIRST_LINE_POS, &mut self.delay)
+            .unwrap();
+        self.driver.write_str(title, &mut self.delay).unwrap();
+        Self::epmty_ghost_chars(self, LINE_LENGTH, title.len() - 1);
     }
 
-    fn epmty_ghost_chars(&mut self, line_length: usize, string_length: usize, delay: &mut Delay) {
+    fn epmty_ghost_chars(&mut self, line_length: usize, string_length: usize) {
         let remaining = line_length - string_length;
         for _ in 0..remaining {
-            self.driver.write_str(EMPTY_CHAR, delay).unwrap();
+            self.driver.write_str(EMPTY_CHAR, &mut self.delay).unwrap();
         }
     }
 }
