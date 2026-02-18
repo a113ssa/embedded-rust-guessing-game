@@ -1,18 +1,21 @@
 use embassy_stm32::{
-    Peri,
-    bind_interrupts,
+    Peri, bind_interrupts,
     gpio::Pull,
     peripherals,
     time::Hertz,
     timer::{
-        CaptureCompareInterruptHandler,
-        Channel,
+        CaptureCompareInterruptHandler, Channel,
         input_capture::{CapturePin, InputCapture},
-        low_level::CountingMode
-    }};
+        low_level::CountingMode,
+    },
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Sender};
 use embassy_time::{Duration, Instant};
-use infrared::{Receiver, protocol::{Nec16, nec::Nec16Command}, receiver::NoPin};
+use infrared::{
+    Receiver,
+    protocol::{Nec16, nec::Nec16Command},
+    receiver::NoPin,
+};
 
 static RECEIVER_FREQ: u32 = 1_000_000;
 static DEBOUNCE_THRESHHOLD: u64 = 300;
@@ -23,7 +26,7 @@ bind_interrupts!(struct Tim2Interrupt {
 });
 
 pub struct RcModule {
-    receiver: Receiver::<Nec16, NoPin, u32, Nec16Command>,
+    receiver: Receiver<Nec16, NoPin, u32, Nec16Command>,
     input_capture: InputCapture<'static, peripherals::TIM2>,
 }
 
@@ -43,20 +46,25 @@ impl RcModule {
                 Tim2Interrupt,
                 Hertz(RECEIVER_FREQ),
                 CountingMode::EdgeAlignedUp,
-            )
+            ),
         }
     }
-
 }
 
 #[embassy_executor::task]
-pub async fn ir_decoder_task(mut rc_module: RcModule, sender: Sender<'static, CriticalSectionRawMutex, char, 8>) -> ! {
+pub async fn ir_decoder_task(
+    mut rc_module: RcModule,
+    sender: Sender<'static, CriticalSectionRawMutex, char, 8>,
+) -> ! {
     let mut last_capture: u32 = 0;
     let mut last_edge: bool = true;
     let mut last_processed_time: Instant = Instant::now();
 
     loop {
-        let current_capture: u32 = rc_module.input_capture.wait_for_any_edge(Channel::Ch1).await;
+        let current_capture: u32 = rc_module
+            .input_capture
+            .wait_for_any_edge(Channel::Ch1)
+            .await;
         let delta_time: u32 = current_capture.wrapping_sub(last_capture);
         last_capture = current_capture;
 
@@ -83,7 +91,7 @@ pub async fn ir_decoder_task(mut rc_module: RcModule, sender: Sender<'static, Cr
     }
 }
 
-fn  map_command(command: u8) -> Option<char> {
+fn map_command(command: u8) -> Option<char> {
     return match command {
         22 => Some('0'),
         12 => Some('1'),

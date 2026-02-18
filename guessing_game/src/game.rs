@@ -1,4 +1,4 @@
-use rand::{RngExt, rngs::SmallRng, SeedableRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
 static GREATER_TITLE: &str = "Number is greater";
 static LOWER_TITLE: &str = "Number is lower";
@@ -30,6 +30,5 @@ impl Game {
     fn get_random_number(range: u8) -> u8 {
         let mut rng = SmallRng::seed_from_u64(42);
         return rng.random_range(..=range);
-
     }
 }
