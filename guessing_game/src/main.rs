@@ -55,6 +55,7 @@ fn process_command(
     if answer.len() > ANSWER_LENGTH - 1 {
         lcd_module.erase();
         answer.clear();
+        return;
     }
 
     match command {

@@ -64,6 +64,7 @@ impl LcdModule {
         self.driver
             .write_str(GUESS_WELCOME_TITLE, &mut self.delay)
             .unwrap();
+        Self::epmty_ghost_chars(self, LINE_LENGTH, GUESS_WELCOME_TITLE.len());
         Self::erase_second_line(self);
     }
 
