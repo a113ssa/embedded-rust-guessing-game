@@ -13,6 +13,8 @@ use heapless::String;
 
 use lcd::{LcdModule, ANSWER_LENGTH};
 use rc::{RcModule, ir_decoder_task};
+use game::Game;
+use helper::convert_to_number;
 
 use defmt_rtt as _;
 use panic_probe as _;
@@ -32,23 +34,42 @@ async fn main(spawner: Spawner) -> ! {
     let rc_module: RcModule =  RcModule::new(p.PA0, p.TIM2);
     spawner.spawn(ir_decoder_task(rc_module, CHANNEL.sender())).unwrap();
 
+    let game: Game = Game::new();
+
     let mut answer: String<ANSWER_LENGTH> = String::new();
 
     loop {
         let command: char = CHANNEL.receive().await;
 
-        if command == 'd' {
+        process_command(command, &mut answer, &game, &mut lcd_module);
+    }
+}
+
+fn process_command(command: char, answer: &mut String<ANSWER_LENGTH>, game: &Game, lcd_module: &mut LcdModule) {
+    if answer.len() > ANSWER_LENGTH - 1 {
+        lcd_module.erase();
+        answer.clear();
+    }
+
+    match command {
+        'd' => {
             answer.pop();
-        } else {
-            answer.push(command).unwrap();
-        }
-
-        if answer.len() > ANSWER_LENGTH - 1 {
-            lcd_module.erase();
-            answer.clear();
-        }
-
-        lcd_module.write(&answer);
+            lcd_module.write(&answer);
+        },
+        'e' => {
+            if !answer.is_empty() {
+                let answer_number: u8 = convert_to_number(answer);
+                let answer_title: &str = &game.check(answer_number);
+                lcd_module.write_title(&answer_title);
+                lcd_module.erase_second_line();
+                answer.clear();
+            }
+        },
+        _ => {
+            if answer.push(command).is_ok() {
+                lcd_module.write(&answer);
+            }
+        },
     }
 }
 
@@ -71,3 +92,5 @@ fn init_peripherals() -> Peripherals {
 
 mod lcd;
 mod rc;
+mod game;
+mod helper;

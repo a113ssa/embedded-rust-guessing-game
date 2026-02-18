@@ -1,13 +1,13 @@
 use embassy_stm32::{Peri, i2c::{Config, I2c, Master}, mode::Blocking, peripherals, time::Hertz};
 use embassy_time::Delay;
 use hd44780_driver::{HD44780, bus::I2CBus};
-use heapless::String;
 
 static I2C_FREEQ: u32 = 100_000;
 static I2C_ADDRESS: u8 = 0x27;
 static FIRST_LINE_POS: u8 = 0;
 static SECOND_LINE_POS: u8 = 42;
-static GUESS_WELCOME_TITLE: &str = "Guess the number";
+static LINE_LENGTH: usize = 16;
+static GUESS_WELCOME_TITLE: &str = "Guess 1 to 100";
 static EMPTY_LINE: &str = "                ";
 static EMPTY_CHAR: &str = " ";
 pub static ANSWER_LENGTH: usize = 4;
@@ -61,20 +61,36 @@ impl LcdModule {
         let mut delay = Delay;
         self.driver.set_cursor_pos(FIRST_LINE_POS, &mut delay).unwrap();
         self.driver.write_str(GUESS_WELCOME_TITLE, &mut delay).unwrap();
+        Self::erase_second_line(self);
+    }
+
+    pub fn erase_second_line(&mut self) {
+        let mut delay = Delay;
         self.driver.set_cursor_pos(SECOND_LINE_POS, &mut delay).unwrap();
         self.driver.write_str(EMPTY_LINE, &mut delay).unwrap();
     }
 
-    pub fn write(&mut self, s: &String<ANSWER_LENGTH>) {
+    pub fn write(&mut self, s: &str) {
         let mut delay = Delay;
         self.driver.set_cursor_pos(SECOND_LINE_POS, &mut delay).unwrap();
 
         self.driver.write_str(s, &mut delay).unwrap();
 
         // remove ghosted chars
-        let remaining = ANSWER_LENGTH - s.len();
+        Self::epmty_ghost_chars(self,ANSWER_LENGTH, s.len(), &mut delay);
+    }
+
+    pub fn write_title(&mut self, title: &str) {
+        let mut delay = Delay;
+        self.driver.set_cursor_pos(FIRST_LINE_POS, &mut delay).unwrap();
+        self.driver.write_str(title, &mut delay).unwrap();
+        Self::epmty_ghost_chars(self, LINE_LENGTH, title.len() - 1, &mut delay);
+    }
+
+    fn epmty_ghost_chars(&mut self, line_length: usize, string_length: usize, delay: &mut Delay) {
+        let remaining = line_length - string_length;
         for _ in 0..remaining {
-            self.driver.write_str(EMPTY_CHAR, &mut delay).unwrap();
+            self.driver.write_str(EMPTY_CHAR, delay).unwrap();
         }
     }
 }
