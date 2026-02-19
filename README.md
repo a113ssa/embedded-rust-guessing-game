@@ -50,5 +50,7 @@ Screenshot are taken from [here](https://www.st.com/resource/en/user_manual/um17
 - "Victory" title is displayed once the correct number is found
 
 
-### Demo
-<kbd><a href="https://youtube.com/shorts/eCo_wzpjWcQ?feature=share">Watch demo video on Youtube</a></kbd>
+### Demo 
+<kbd><a href="https://youtube.com/shorts/eCo_wzpjWcQ?feature=share">Watch demo video on Youtube</a></kbd><br><br><br>
+
+> Cherry-picked from https://github.com/a113ssa/stm32-setup/tree/main/guessing_game and improved here
