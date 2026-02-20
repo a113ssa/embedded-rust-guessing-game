@@ -21,7 +21,9 @@ use panic_probe as _;
 
 use defmt::info;
 
-static CHANNEL: Channel<CriticalSectionRawMutex, char, 8> = Channel::new();
+use crate::game_input::GameInput;
+
+static CHANNEL: Channel<CriticalSectionRawMutex, GameInput, 8> = Channel::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
@@ -40,14 +42,14 @@ async fn main(spawner: Spawner) -> ! {
     let mut answer: String<ANSWER_LENGTH> = String::new();
 
     loop {
-        let command: char = CHANNEL.receive().await;
+        let command: GameInput = CHANNEL.receive().await;
 
         process_command(command, &mut answer, &game, &mut lcd_module);
     }
 }
 
 fn process_command(
-    command: char,
+    command: GameInput,
     answer: &mut String<ANSWER_LENGTH>,
     game: &Game,
     lcd_module: &mut LcdModule,
@@ -59,11 +61,11 @@ fn process_command(
     }
 
     match command {
-        'd' => {
+        GameInput::Backspace => {
             answer.pop();
             lcd_module.write(&answer);
         }
-        'e' => {
+        GameInput::Submit => {
             if !answer.is_empty() {
                 let answer_number: u8 = convert_to_number(answer);
                 let answer_title: &str = &game.check(answer_number);
@@ -73,7 +75,7 @@ fn process_command(
             }
         }
         _ => {
-            if answer.push(command).is_ok() {
+            if answer.push(command as u8 as char).is_ok() {
                 lcd_module.write(&answer);
             }
         }
@@ -101,3 +103,4 @@ mod game;
 mod helper;
 mod lcd;
 mod rc;
+mod game_input;
