@@ -17,6 +17,8 @@ use infrared::{
     receiver::NoPin,
 };
 
+use crate::game_input::GameInput;
+
 static RECEIVER_FREQ: u32 = 1_000_000;
 static DEBOUNCE_THRESHHOLD: u64 = 300;
 static DEBOUNCE_DURATION: Duration = Duration::from_millis(DEBOUNCE_THRESHHOLD);
@@ -49,12 +51,30 @@ impl RcModule {
             ),
         }
     }
+
+    pub fn map_command(&self, command: u8) -> Option<GameInput> {
+        return match command {
+            22 => Some(GameInput::Zero),
+            12 => Some(GameInput::One),
+            24 => Some(GameInput::Two),
+            94 => Some(GameInput::Three),
+            8 => Some(GameInput::Four),
+            28 => Some(GameInput::Five),
+            90 => Some(GameInput::Six),
+            66 => Some(GameInput::Seven),
+            82 => Some(GameInput::Eight),
+            74 => Some(GameInput::Nine),
+            68 => Some(GameInput::Backspace),
+            64 => Some(GameInput::Submit),
+            _ => None,
+        };
+}
 }
 
 #[embassy_executor::task]
 pub async fn ir_decoder_task(
     mut rc_module: RcModule,
-    sender: Sender<'static, CriticalSectionRawMutex, char, 8>,
+    sender: Sender<'static, CriticalSectionRawMutex, GameInput, 8>,
 ) -> ! {
     let mut last_capture: u32 = 0;
     let mut last_edge: bool = true;
@@ -75,7 +95,7 @@ pub async fn ir_decoder_task(
                 if current_processed_time.duration_since(last_processed_time) >= DEBOUNCE_DURATION {
                     last_processed_time = Instant::now();
 
-                    let command: Option<char> = map_command(cmd.cmd);
+                    let command: Option<GameInput> = rc_module.map_command(cmd.cmd);
 
                     match command {
                         Some(c) => sender.send(c).await,
@@ -89,22 +109,4 @@ pub async fn ir_decoder_task(
 
         last_edge = !last_edge;
     }
-}
-
-fn map_command(command: u8) -> Option<char> {
-    return match command {
-        22 => Some('0'),
-        12 => Some('1'),
-        24 => Some('2'),
-        94 => Some('3'),
-        8 => Some('4'),
-        28 => Some('5'),
-        90 => Some('6'),
-        66 => Some('7'),
-        82 => Some('8'),
-        74 => Some('9'),
-        68 => Some('d'),
-        64 => Some('e'),
-        _ => None,
-    };
 }
