@@ -19,7 +19,6 @@ use rc::{RcModule, ir_decoder_task};
 use defmt_rtt as _;
 use panic_probe as _;
 
-use defmt::info;
 
 use crate::game_input::GameInput;
 
@@ -63,20 +62,20 @@ fn process_command(
     match command {
         GameInput::Backspace => {
             answer.pop();
-            lcd_module.write(&answer);
+            lcd_module.write(answer);
         }
         GameInput::Submit => {
             if !answer.is_empty() {
                 let answer_number: u8 = convert_to_number(answer);
-                let answer_title: &str = &game.check(answer_number);
-                lcd_module.write_title(&answer_title);
+                let answer_title: &str = game.check(answer_number);
+                lcd_module.write_title(answer_title);
                 lcd_module.erase_second_line();
                 answer.clear();
             }
         }
         _ => {
             if answer.push(command as u8 as char).is_ok() {
-                lcd_module.write(&answer);
+                lcd_module.write(answer);
             }
         }
     }
@@ -96,7 +95,7 @@ fn init_peripherals() -> Peripherals {
         divr: Some(PllRDiv::DIV2),
     });
 
-    return embassy_stm32::init(config);
+    embassy_stm32::init(config)
 }
 
 mod game;

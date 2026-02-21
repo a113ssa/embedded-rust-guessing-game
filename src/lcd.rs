@@ -54,7 +54,7 @@ impl LcdModule {
 
         let mut delay: Delay = Delay;
 
-        return HD44780::new_i2c(i2c, I2C_ADDRESS, &mut delay).expect("Failed to init LCD");
+        HD44780::new_i2c(i2c, I2C_ADDRESS, &mut delay).expect("Failed to init LCD")
     }
 
     pub fn erase(&mut self) {

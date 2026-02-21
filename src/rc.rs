@@ -53,7 +53,7 @@ impl RcModule {
     }
 
     pub fn map_command(&self, command: u8) -> Option<GameInput> {
-        return match command {
+        match command {
             22 => Some(GameInput::Zero),
             12 => Some(GameInput::One),
             24 => Some(GameInput::Two),
@@ -67,7 +67,7 @@ impl RcModule {
             68 => Some(GameInput::Backspace),
             64 => Some(GameInput::Submit),
             _ => None,
-        };
+        }
 }
 }
 
@@ -97,10 +97,7 @@ pub async fn ir_decoder_task(
 
                     let command: Option<GameInput> = rc_module.map_command(cmd.cmd);
 
-                    match command {
-                        Some(c) => sender.send(c).await,
-                        _ => {}
-                    }
+                    if let Some(c) = command { sender.send(c).await }
                 }
             }
             Ok(None) => {}
