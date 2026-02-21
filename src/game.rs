@@ -19,16 +19,16 @@ impl Game {
 
     pub fn check(&self, number: u8) -> &'static str {
         if number > self.random_number {
-            return LOWER_TITLE;
+            LOWER_TITLE
         } else if number < self.random_number {
-            return GREATER_TITLE;
+            GREATER_TITLE
         } else {
-            return RIGHT_TITILE;
+            RIGHT_TITILE
         }
     }
 
     fn get_random_number(range: u8) -> u8 {
         let mut rng = SmallRng::seed_from_u64(42);
-        return rng.random_range(..=range);
+        rng.random_range(..=range)
     }
 }
